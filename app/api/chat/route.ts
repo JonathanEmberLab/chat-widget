@@ -1,13 +1,41 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { getAvailableSlots, createCalendarEvent } from '@/lib/google-calendar';
-import { getSiteConfig, saveLead, saveConversation, saveBooking } from '@/lib/supabase';
+import { getSiteConfig, getSiteKnowledge, saveLead, saveConversation, saveBooking, saveLeadAnalysis } from '@/lib/supabase';
+import { analyzeConversation } from '@/lib/lead-analysis';
 import { corsHeaders, preflight } from '@/lib/cors';
 import type { ChatAction, ChatMessage, SiteConfig } from '@/lib/types';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-function buildSystemPrompt(site: SiteConfig): string {
+/** Stable part of the system prompt: persona + behavior + knowledge base. Safe to cache. */
+function buildStaticPrompt(
+  site: SiteConfig,
+  knowledge: { title: string; content: string }[],
+): string {
+  let prompt = `${site.system_prompt}
+
+## Your behavior
+- Always respond in the same language the user writes in.
+- Keep responses short and conversational — this is a chat widget.
+- When the user wants to contact a human or needs a personalized quote, use the open_whatsapp tool.
+- When the user wants to schedule a meeting, first use check_availability to show options, then collect their name and email, then use book_meeting.`;
+
+  if (knowledge.length) {
+    const kb = knowledge.map(d => `### ${d.title}\n${d.content}`).join('\n\n---\n\n');
+    prompt += `
+
+## Business knowledge base
+Use the information below to answer questions about the business, its products, services, policies, and FAQs. Only use facts stated here — if the answer isn't here, say you don't have that detail and offer to connect them via WhatsApp. Never invent information.
+
+${kb}`;
+  }
+
+  return prompt;
+}
+
+/** Dynamic part: changes every request (current time + visitor identity), so it must NOT be cached. */
+function buildDynamicPrompt(lead?: { name?: string; email?: string }): string {
   const now = new Date().toLocaleString('en-US', {
     timeZone: 'America/Mexico_City',
     weekday: 'long',
@@ -18,15 +46,12 @@ function buildSystemPrompt(site: SiteConfig): string {
     minute: '2-digit',
   });
 
-  return `${site.system_prompt}
+  const identity = lead?.name
+    ? `\n## Visitor (already identified)
+- You are talking to ${lead.name}${lead.email ? ` (${lead.email})` : ''}. They already gave their contact info — do NOT ask for it again. Reuse it for bookings.\n`
+    : '';
 
-## Your behavior
-- Always respond in the same language the user writes in.
-- Keep responses short and conversational — this is a chat widget.
-- When the user wants to contact a human or needs a personalized quote, use the open_whatsapp tool.
-- When the user wants to schedule a meeting, first use check_availability to show options, then collect their name and email, then use book_meeting.
-
-## Scheduling rules (IMPORTANT)
+  return `${identity}## Scheduling rules (IMPORTANT)
 - The current date and time is ${now} (timezone America/Mexico_City).
 - NEVER invent or guess dates. When booking, you MUST pass the exact ISO 8601 'iso' value returned by check_availability for the slot the user chose.
 - If the user names a day/time not in the available slots, call check_availability again and offer the real options.`;
@@ -83,7 +108,11 @@ export async function POST(req: NextRequest) {
 
     const cors = corsHeaders(site.allowed_domain, origin);
 
-    const { messages } = (await req.json()) as { messages: ChatMessage[] };
+    const { messages, conversation_id, lead } = (await req.json()) as {
+      messages: ChatMessage[];
+      conversation_id?: string;
+      lead?: { name?: string; email?: string };
+    };
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400, headers: cors });
     }
@@ -91,13 +120,20 @@ export async function POST(req: NextRequest) {
     let currentMessages: Anthropic.MessageParam[] = messages.map(m => ({ role: m.role, content: m.content }));
     let action: ChatAction | null = null;
     let finalText = '';
-    const systemPrompt = buildSystemPrompt(site);
+
+    // Stable persona + knowledge base goes in a cached block (cheap to resend);
+    // the dated scheduling rules stay in a separate uncached block.
+    const knowledge = await getSiteKnowledge(siteKey);
+    const system: Anthropic.TextBlockParam[] = [
+      { type: 'text', text: buildStaticPrompt(site, knowledge), cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: buildDynamicPrompt(lead) },
+    ];
 
     for (let i = 0; i < 5; i++) {
       const response = await client.messages.create({
         model: 'claude-haiku-4-5',
         max_tokens: 1024,
-        system: systemPrompt,
+        system,
         tools,
         messages: currentMessages,
       });
@@ -130,8 +166,13 @@ export async function POST(req: NextRequest) {
           });
           toolResult = JSON.stringify(result);
           action = { type: 'booked', ...result };
-          // Persist lead + booking
-          await saveLead({ site_key: siteKey, name: input.name as string, email: input.email as string, source: 'booking' });
+          // Persist lead + booking (tie to the gate identity so it's the same lead row)
+          await saveLead({
+            site_key: siteKey,
+            name: (lead?.name ?? input.name) as string,
+            email: (lead?.email ?? input.email) as string,
+            source: 'booking',
+          });
           if (!result.mock) {
             await saveBooking({
               site_key: siteKey,
@@ -145,7 +186,7 @@ export async function POST(req: NextRequest) {
           const url = `https://wa.me/${site.whatsapp_number}?text=${encodeURIComponent(input.message as string)}`;
           toolResult = url;
           action = { type: 'whatsapp', url };
-          await saveLead({ site_key: siteKey, source: 'whatsapp' });
+          await saveLead({ site_key: siteKey, name: lead?.name, email: lead?.email, source: 'whatsapp' });
         }
 
         currentMessages = [
@@ -156,8 +197,24 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Store the conversation (fire-and-forget, non-blocking on failure)
-    saveConversation({ site_key: siteKey, messages: [...messages, { role: 'assistant', content: finalText }] }).catch(() => {});
+    // Store the conversation (fire-and-forget, non-blocking on failure).
+    // conversation_id makes this an upsert → one growing row per chat.
+    const fullMessages: ChatMessage[] = [...messages, { role: 'assistant', content: finalText }];
+    saveConversation({
+      site_key: siteKey,
+      conversation_id,
+      email: lead?.email,
+      messages: fullMessages,
+    }).catch(() => {});
+
+    // Auto lead-scoring: once the visitor has engaged (2+ messages), re-analyze
+    // the conversation and store the classification on their lead. Fire-and-forget.
+    const userMessages = messages.filter(m => m.role === 'user').length;
+    if (lead?.email && userMessages >= 2) {
+      analyzeConversation(fullMessages, site.name)
+        .then(a => saveLeadAnalysis(siteKey, lead.email as string, a))
+        .catch(() => {});
+    }
 
     return NextResponse.json({ text: finalText, action }, { headers: cors });
   } catch {

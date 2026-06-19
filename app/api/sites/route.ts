@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listSites, createSite } from '@/lib/supabase';
+import { isAuthorized } from '@/lib/admin-auth';
 import type { SiteConfig } from '@/lib/types';
-
-function isAuthorized(req: NextRequest): boolean {
-  const token = req.headers.get('authorization')?.replace('Bearer ', '');
-  return !!token && token === process.env.ADMIN_API_TOKEN;
-}
 
 export async function GET(req: NextRequest) {
   if (!isAuthorized(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

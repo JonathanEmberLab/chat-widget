@@ -53,14 +53,42 @@ Host site ──<script src=widget.js data-site=KEY>──> floating button + if
 |---|---|
 | `app/api/chat/route.ts` | Multi-tenant chat. Loads site config, builds system prompt, runs the Claude tool-use loop (max 5 iterations), persists leads/bookings/conversations. CORS-aware. |
 | `lib/google-calendar.ts` | `getAvailableSlots(calendarId)` + `createCalendarEvent(...)`. Falls back to mock slots if Google creds are missing. Uses `sendUpdates: 'all'` to email invites. |
-| `lib/supabase.ts` | Server-only client (service role key) + helpers: getSiteConfig, listSites, createSite, saveLead, saveConversation, saveBooking. |
+| `lib/supabase.ts` | Server-only client (service role key) + helpers: getSiteConfig, listSites, createSite, saveLead, saveConversation, saveBooking, + knowledge (listKnowledge, addKnowledge, deleteKnowledge, getSiteKnowledge). |
+| `lib/knowledge.ts` | Ingestion: normalizes any source to plain text. `extractFromUrl` (cheerio), `extractFromFile` (PDF via unpdf, DOCX via mammoth, TXT/MD/CSV). 100k-char cap per doc. |
+| `app/api/sites/[siteKey]/knowledge/route.ts` | Admin KB API. GET list, POST (JSON for text/URL, multipart for file uploads). `[id]/route.ts` handles DELETE. Token-gated. |
+| `components/admin/KnowledgeDrawer.tsx` | Admin UI to add text/FAQ, upload files, or scrape a URL per site, and list/delete docs. Opened from the 📖 button in `SitesView`. |
 | `lib/cors.ts` | Per-site CORS headers (allowed_domain). |
-| `lib/types.ts` | `SiteConfig`, `ChatMessage`, `ChatAction`. |
+| `lib/types.ts` | `SiteConfig`, `ChatMessage`, `ChatAction`, `KnowledgeDoc`. |
 | `components/ChatUI.tsx` | The chat UI rendered inside the iframe. Config-driven. Posts `chat-widget:close` to the parent window. |
 | `app/embed/page.tsx` | Iframe content; reads `?site=`. |
 | `app/admin/page.tsx` | Admin panel (token-gated). Create sites, copy snippet. |
 | `public/widget.js` | Vanilla JS loader. Injects button + iframe, derives backend origin from its own `src`. |
-| `supabase/schema.sql` | Tables: sites, leads, conversations, bookings. |
+| `supabase/schema.sql` | Tables: sites, leads, conversations, bookings, knowledge. |
+
+## Knowledge base (per-site RAG-lite)
+
+Each site has a `knowledge` table (template/text/file/url docs, all normalized to
+plain text/markdown). Clients add content from the admin (📖 button → KnowledgeDrawer):
+fill a guided **template**, paste text/FAQ, upload PDF/DOCX/TXT/MD/CSV, or scrape a URL.
+
+- **Templates** (`lib/knowledge-templates.ts`): guided forms (general, horarios,
+  ubicacion, servicios, faq). The form's structured values are stored in `data` (jsonb)
+  AND rendered to markdown `content`. `data` lets the form be re-opened/edited (PATCH);
+  `content` is what the model reads and what the admin shows formatted (react-markdown).
+  Rendering lives server-side (`renderTemplate`) so it's authoritative. To add a template:
+  extend `TemplateId`, `TEMPLATE_META`, `emptyData`, `renderTemplate`, and add a form
+  branch in `components/admin/KnowledgeTemplateForm.tsx`.
+
+- **How it reaches Claude:** `app/api/chat/route.ts` loads `getSiteKnowledge(siteKey)`
+  and injects it into the **system prompt**, split into two blocks:
+  a **stable block** (persona + behavior + all KB docs) with `cache_control: ephemeral`,
+  and a **dynamic block** (current date for scheduling) left uncached. This is
+  injection-not-embeddings: simple + cheap thanks to prompt caching. Good up to
+  ~100–150 pages per site; migrate to pgvector RAG only if a client outgrows that —
+  the admin UI and `knowledge` table stay the same, only the chat-time read changes.
+- **Ingestion caps:** 100k chars/doc (`lib/knowledge.ts`). File uploads go straight
+  through the route handler, so they're bound by the platform body limit (~4.5 MB on
+  Vercel serverless). For bigger files, route through Supabase Storage.
 
 ## Conventions & gotchas
 

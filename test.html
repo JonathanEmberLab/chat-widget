@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sitio de prueba — Chat Widget</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 64px 24px;
+           background: #f4f4f5; color: #18181b; line-height: 1.6; }
+    .wrap { max-width: 640px; margin: 0 auto; }
+    h1 { font-size: 28px; }
+    code { background: #e4e4e7; padding: 2px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Sitio de prueba 🌐</h1>
+    <p>Esto simula el sitio de un cliente (WordPress, Shopify, HTML plano, lo que sea).</p>
+    <p>El botón flotante de chat aparece abajo a la derecha 👉 gracias a un solo
+       <code>&lt;script&gt;</code>. Ábrelo y prueba: pregunta algo, pide agendar,
+       elige un horario.</p>
+  </div>
+
+  <!-- ▼▼▼ Esto es lo único que un cliente pega en su sitio ▼▼▼ -->
+  <script src="http://localhost:3000/widget.js" data-site="test-demo"></script>
+  <!-- ▲▲▲ -->
+</body>
+</html>

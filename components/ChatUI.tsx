@@ -23,6 +23,39 @@ export function ChatUI({ siteKey }: { siteKey: string }) {
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<ChatAction | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const convIdRef = useRef<string>('');
+
+  // Lead gate: visitors must leave name + email before they can chat.
+  const [lead, setLead] = useState<{ name: string; email: string } | null>(null);
+  const [leadName, setLeadName] = useState('');
+  const [leadEmail, setLeadEmail] = useState('');
+  const [leadErr, setLeadErr] = useState('');
+  const [leadSaving, setLeadSaving] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(`chat-widget:lead:${siteKey}`);
+      if (raw) setLead(JSON.parse(raw));
+    } catch {
+      /* ignore */
+    }
+  }, [siteKey]);
+
+  // Stable per-tab conversation id so the backend can upsert one growing row.
+  useEffect(() => {
+    const key = `chat-widget:conv:${siteKey}`;
+    let id = '';
+    try {
+      id = sessionStorage.getItem(key) ?? '';
+      if (!id) {
+        id = crypto.randomUUID();
+        sessionStorage.setItem(key, id);
+      }
+    } catch {
+      id = `${siteKey}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+    convIdRef.current = id;
+  }, [siteKey]);
 
   useEffect(() => {
     fetch(`/api/sites/${siteKey}/config`)
@@ -37,6 +70,36 @@ export function ChatUI({ siteKey }: { siteKey: string }) {
 
   const accent = config?.accent_color ?? '#4A8F8A';
 
+  const submitLead = useCallback(async () => {
+    const name = leadName.trim();
+    const email = leadEmail.trim();
+    if (!name) { setLeadErr('Escribe tu nombre'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setLeadErr('Escribe un correo válido'); return; }
+    setLeadErr('');
+    setLeadSaving(true);
+    try {
+      const res = await fetch(`/api/lead?site=${siteKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setLeadErr(d.error || 'No se pudo guardar. Intenta de nuevo.');
+        setLeadSaving(false);
+        return;
+      }
+    } catch {
+      setLeadErr('Error de conexión. Intenta de nuevo.');
+      setLeadSaving(false);
+      return;
+    }
+    const l = { name, email };
+    try { sessionStorage.setItem(`chat-widget:lead:${siteKey}`, JSON.stringify(l)); } catch { /* ignore */ }
+    setLead(l);
+    setLeadSaving(false);
+  }, [leadName, leadEmail, siteKey]);
+
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || loading) return;
     const userMsg: ChatMessage = { role: 'user', content: text.trim() };
@@ -49,7 +112,7 @@ export function ChatUI({ siteKey }: { siteKey: string }) {
       const res = await fetch(`/api/chat?site=${siteKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: updated }),
+        body: JSON.stringify({ messages: updated, conversation_id: convIdRef.current, lead }),
       });
       const data = await res.json();
       if (data.text) setMessages(prev => [...prev, { role: 'assistant', content: data.text }]);
@@ -60,7 +123,7 @@ export function ChatUI({ siteKey }: { siteKey: string }) {
     } finally {
       setLoading(false);
     }
-  }, [messages, loading, siteKey]);
+  }, [messages, loading, siteKey, lead]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', fontFamily: 'system-ui, sans-serif', background: '#fff' }}>
@@ -78,11 +141,49 @@ export function ChatUI({ siteKey }: { siteKey: string }) {
         </button>
       </div>
 
+      {/* Lead gate — must leave name + email before chatting */}
+      {!lead ? (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <p style={{ fontSize: 14, color: '#1D1D1D', lineHeight: 1.4, margin: 0 }}>
+            {config?.welcome_message ?? 'Hola 👋 ¿En qué puedo ayudarte?'}
+          </p>
+          <p style={{ fontSize: 13, color: '#666', lineHeight: 1.4, margin: 0 }}>
+            Para empezar, déjanos tus datos:
+          </p>
+          <input
+            value={leadName}
+            onChange={e => setLeadName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && submitLead()}
+            placeholder="Tu nombre"
+            style={{ fontSize: 14, padding: '10px 12px', border: '1px solid #ddd', borderRadius: 6, outline: 'none' }}
+          />
+          <input
+            value={leadEmail}
+            onChange={e => setLeadEmail(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && submitLead()}
+            placeholder="Tu correo"
+            type="email"
+            style={{ fontSize: 14, padding: '10px 12px', border: '1px solid #ddd', borderRadius: 6, outline: 'none' }}
+          />
+          {leadErr && <span style={{ fontSize: 12, color: '#e73f40' }}>{leadErr}</span>}
+          <button
+            onClick={submitLead}
+            disabled={leadSaving}
+            style={{ padding: '11px', background: accent, color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 600, cursor: leadSaving ? 'default' : 'pointer', opacity: leadSaving ? 0.7 : 1 }}
+          >
+            {leadSaving ? 'Guardando…' : 'Comenzar'}
+          </button>
+          <span style={{ fontSize: 11, color: '#999', lineHeight: 1.3 }}>
+            Usaremos tus datos para darte seguimiento.
+          </span>
+        </div>
+      ) : (
+      <>
       {/* Messages */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {messages.length === 0 && (
           <p style={{ fontSize: 14, color: '#1D1D1D', lineHeight: 1.4 }}>
-            {config?.welcome_message ?? 'Hola 👋 ¿En qué puedo ayudarte?'}
+            ¡Hola {lead.name.split(' ')[0]}! ¿En qué puedo ayudarte?
           </p>
         )}
 
@@ -150,6 +251,8 @@ export function ChatUI({ siteKey }: { siteKey: string }) {
           →
         </button>
       </div>
+      </>
+      )}
     </div>
   );
 }
