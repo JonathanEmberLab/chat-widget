@@ -2,10 +2,6 @@ export interface SiteConfig {
   site_key: string;
   name: string;
   system_prompt: string;
-  /** Google Calendar ID where meetings are booked (e.g. owner email or 'primary'). */
-  calendar_id: string;
-  /** Fixed responsible email always invited to meetings. */
-  responsible_email: string;
   /** WhatsApp number in international format, digits only (e.g. 525668029233). */
   whatsapp_number: string;
   /** Accent color for the widget UI. */
@@ -45,16 +41,6 @@ export interface Lead {
   analyzed_at?: string | null;
 }
 
-export interface Booking {
-  id: number;
-  site_key: string;
-  name: string;
-  email: string;
-  datetime: string;
-  meet_link?: string | null;
-  created_at: string;
-}
-
 export type KnowledgeSourceType = 'text' | 'file' | 'url' | 'template';
 
 export interface KnowledgeDoc {
@@ -92,6 +78,4 @@ export interface Conversation {
 }
 
 export type ChatAction =
-  | { type: 'whatsapp'; url: string }
-  | { type: 'slots'; slots: { iso: string; label: string }[] }
-  | { type: 'booked'; label: string; meetLink?: string; mock?: boolean };
+  | { type: 'whatsapp'; url: string };

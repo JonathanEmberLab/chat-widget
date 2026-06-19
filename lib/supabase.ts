@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import type { SiteConfig, ChatMessage, Lead, Booking, KnowledgeDoc, Conversation, LeadAnalysis } from './types';
+import type { SiteConfig, ChatMessage, Lead, KnowledgeDoc, Conversation, LeadAnalysis } from './types';
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -59,14 +59,6 @@ export async function listLeads(siteKey?: string): Promise<Lead[]> {
   const { data, error } = await query;
   if (error) return [];
   return (data ?? []) as Lead[];
-}
-
-export async function listBookings(siteKey?: string): Promise<Booking[]> {
-  let query = supabase.from('bookings').select('*').order('datetime', { ascending: false });
-  if (siteKey) query = query.eq('site_key', siteKey);
-  const { data, error } = await query;
-  if (error) return [];
-  return (data ?? []) as Booking[];
 }
 
 // Funnel order — higher = further along. saveLead never downgrades a lead.
@@ -227,14 +219,4 @@ export async function getSiteKnowledge(
     .order('created_at', { ascending: true });
   if (error) return [];
   return (data ?? []) as Pick<KnowledgeDoc, 'title' | 'content' | 'source_type'>[];
-}
-
-export async function saveBooking(params: {
-  site_key: string;
-  name: string;
-  email: string;
-  datetime: string;
-  meet_link?: string;
-}) {
-  await supabase.from('bookings').insert(params);
 }

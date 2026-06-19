@@ -14,7 +14,6 @@ interface Props {
 }
 
 const DEFAULTS: Partial<SiteConfig> = {
-  calendar_id: 'primary',
   accent_color: '#4A8F8A',
   welcome_message: 'Hola 👋 ¿En qué puedo ayudarte?',
 };
@@ -73,23 +72,6 @@ export default function SiteFormDrawer({ open, initial, loading, onClose, onSubm
           tooltip="Quién es el negocio, qué servicios ofrece, tono. Define cómo responde el bot."
         >
           <Input.TextArea rows={5} placeholder="Eres el asistente de..." />
-        </Form.Item>
-
-        <Form.Item
-          name="calendar_id"
-          label="Calendar ID"
-          tooltip="Correo dueño del calendario de Google, o 'primary'."
-        >
-          <Input placeholder="primary" />
-        </Form.Item>
-
-        <Form.Item
-          name="responsible_email"
-          label="Correo responsable"
-          tooltip="Siempre invitado a las reuniones agendadas."
-          rules={[{ type: 'email', message: 'Correo inválido' }]}
-        >
-          <Input placeholder="ventas@cliente.com" />
         </Form.Item>
 
         <Form.Item name="whatsapp_number" label="WhatsApp" tooltip="Solo dígitos, formato internacional.">

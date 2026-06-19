@@ -1,4 +1,4 @@
-import type { SiteConfig, Lead, Booking, KnowledgeDoc, Conversation, LeadAnalysis } from './types';
+import type { SiteConfig, Lead, KnowledgeDoc, Conversation, LeadAnalysis } from './types';
 
 export class UnauthorizedError extends Error {}
 
@@ -28,10 +28,6 @@ export function makeAdminApi(token: string) {
       req<{ ok: boolean }>(`/api/sites/${encodeURIComponent(siteKey)}`, { method: 'DELETE' }),
     listLeads: (site?: string) =>
       req<{ leads: Lead[] }>(`/api/leads${site ? `?site=${encodeURIComponent(site)}` : ''}`).then(d => d.leads),
-    listBookings: (site?: string) =>
-      req<{ bookings: Booking[] }>(`/api/bookings${site ? `?site=${encodeURIComponent(site)}` : ''}`).then(
-        d => d.bookings,
-      ),
     analyzeConversation: (id: number) =>
       req<{ analysis: LeadAnalysis; saved: boolean }>(`/api/conversations/${id}/analyze`, { method: 'POST' }),
     listConversations: (site?: string) =>

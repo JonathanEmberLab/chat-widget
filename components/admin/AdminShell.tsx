@@ -16,7 +16,6 @@ import {
   LayoutDashboard,
   AppWindow,
   Users,
-  CalendarDays,
   MessageSquare,
   LogOut,
   MessagesSquare,
@@ -26,7 +25,6 @@ import { makeAdminApi, UnauthorizedError } from '@/lib/admin-api';
 import DashboardView from './DashboardView';
 import SitesView from './SitesView';
 import LeadsView from './LeadsView';
-import BookingsView from './BookingsView';
 import ConversationsView from './ConversationsView';
 
 const { Header, Sider, Content } = Layout;
@@ -35,7 +33,6 @@ const MENU = [
   { key: 'dashboard', icon: <LayoutDashboard size={18} />, label: 'Dashboard' },
   { key: 'sites', icon: <AppWindow size={18} />, label: 'Sitios' },
   { key: 'leads', icon: <Users size={18} />, label: 'Leads' },
-  { key: 'bookings', icon: <CalendarDays size={18} />, label: 'Agendas' },
   { key: 'conversations', icon: <MessageSquare size={18} />, label: 'Conversaciones' },
 ];
 
@@ -258,7 +255,6 @@ function Dashboard({ token, onLogout }: { token: string; onLogout: () => void })
             <SitesView api={api} sites={sites} loading={loadingSites} reload={reloadSites} />
           )}
           {view === 'leads' && <LeadsView api={api} sites={sites} />}
-          {view === 'bookings' && <BookingsView api={api} sites={sites} />}
           {view === 'conversations' && <ConversationsView api={api} sites={sites} />}
         </Content>
       </Layout>

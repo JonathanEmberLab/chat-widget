@@ -21,8 +21,6 @@ export async function POST(req: NextRequest) {
     site_key: body.site_key,
     name: body.name,
     system_prompt: body.system_prompt ?? `You are a helpful assistant for ${body.name}.`,
-    calendar_id: body.calendar_id ?? 'primary',
-    responsible_email: body.responsible_email ?? '',
     whatsapp_number: body.whatsapp_number ?? '',
     accent_color: body.accent_color ?? '#4A8F8A',
     allowed_domain: body.allowed_domain ?? '',

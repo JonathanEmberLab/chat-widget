@@ -212,28 +212,6 @@ export function ChatUI({ siteKey }: { siteKey: string }) {
           </a>
         )}
 
-        {action?.type === 'slots' && !loading && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {action.slots.map((slot, i) => (
-              <button key={i} onClick={() => sendMessage(`Quiero el horario: ${slot.label}`)}
-                style={{ textAlign: 'left', fontSize: 13, padding: '8px 12px', background: '#f0f7f6', border: `1px solid ${accent}`, borderRadius: 4, cursor: 'pointer', textTransform: 'capitalize' }}>
-                {slot.label}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {action?.type === 'booked' && !loading && (
-          <div style={{ background: '#f0f7f6', border: `1px solid ${accent}`, padding: '12px', borderRadius: 4 }}>
-            <p style={{ fontSize: 14, fontWeight: 600, textTransform: 'capitalize' }}>✓ {action.label}</p>
-            {action.meetLink && (
-              <a href={action.meetLink} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: accent }}>
-                Unirse a Google Meet
-              </a>
-            )}
-          </div>
-        )}
-
         <div ref={bottomRef} />
       </div>
 
