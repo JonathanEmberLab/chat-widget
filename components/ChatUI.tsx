@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { ChatAction, ChatMessage } from '@/lib/types';
 
@@ -9,6 +9,54 @@ interface PublicConfig {
   name: string;
   accent_color: string;
   welcome_message: string;
+}
+
+/**
+ * Keyframes + hover/transition rules injected into the iframe document.
+ * Inline styles can't express @keyframes or :hover, so we ship one <style>
+ * block. Self-contained inside the iframe, so it never leaks to the host page.
+ */
+const WIDGET_CSS = `
+@keyframes cw-msg-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes cw-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes cw-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%           { transform: translateY(-5px); opacity: 1; }
+}
+.cw-msg { animation: cw-msg-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.cw-fade { animation: cw-fade-in 0.4s ease both; }
+.cw-typing-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: #9aa0a6; animation: cw-dot 1.2s infinite ease-in-out;
+}
+.cw-send-btn { transition: transform 0.15s ease, background 0.2s ease, opacity 0.2s ease; }
+.cw-send-btn:not(:disabled):hover { background: #000; transform: scale(1.08); }
+.cw-send-btn:not(:disabled):active { transform: scale(0.94); }
+.cw-primary-btn { transition: transform 0.15s ease, filter 0.2s ease, opacity 0.2s ease; }
+.cw-primary-btn:not(:disabled):hover { filter: brightness(1.08); transform: translateY(-1px); }
+.cw-primary-btn:not(:disabled):active { transform: translateY(0); }
+.cw-close-btn { transition: color 0.15s ease, transform 0.15s ease; }
+.cw-close-btn:hover { color: #fff; transform: rotate(90deg); }
+.cw-wa-btn { transition: transform 0.15s ease, filter 0.2s ease; }
+.cw-wa-btn:hover { filter: brightness(1.06); transform: translateY(-1px); }
+.cw-input { transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+`;
+
+/** Three dots that bounce in sequence — the "typing…" indicator. */
+function TypingDots() {
+  return (
+    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+      <span className="cw-typing-dot" style={{ animationDelay: '0s' }} />
+      <span className="cw-typing-dot" style={{ animationDelay: '0.18s' }} />
+      <span className="cw-typing-dot" style={{ animationDelay: '0.36s' }} />
+    </span>
+  );
 }
 
 /**
@@ -24,6 +72,7 @@ export function ChatUI({ siteKey }: { siteKey: string }) {
   const [action, setAction] = useState<ChatAction | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const convIdRef = useRef<string>('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Lead gate: visitors must leave name + email before they can chat.
   const [lead, setLead] = useState<{ name: string; email: string } | null>(null);
@@ -67,6 +116,14 @@ export function ChatUI({ siteKey }: { siteKey: string }) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, action, loading]);
+
+  // Auto-grow the textarea with its content, up to ~5 lines.
+  useLayoutEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
+  }, [input]);
 
   const accent = config?.accent_color ?? '#4A8F8A';
 
@@ -127,14 +184,16 @@ export function ChatUI({ siteKey }: { siteKey: string }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', fontFamily: 'system-ui, sans-serif', background: '#fff' }}>
+      <style dangerouslySetInnerHTML={{ __html: WIDGET_CSS }} />
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: '#1D1D1D', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: accent }} />
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: accent, boxShadow: `0 0 0 0 ${accent}` }} />
           <span style={{ color: '#fff', fontSize: 14, fontWeight: 600 }}>{config?.name ?? 'Chat'}</span>
         </div>
         <button
           onClick={() => window.parent.postMessage({ type: 'chat-widget:close' }, '*')}
+          className="cw-close-btn"
           style={{ background: 'none', border: 'none', color: '#bbb', fontSize: 20, cursor: 'pointer', lineHeight: 1 }}
         >
           ×
@@ -143,7 +202,7 @@ export function ChatUI({ siteKey }: { siteKey: string }) {
 
       {/* Lead gate — must leave name + email before chatting */}
       {!lead ? (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div className="cw-fade" style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           <p style={{ fontSize: 14, color: '#1D1D1D', lineHeight: 1.4, margin: 0 }}>
             {config?.welcome_message ?? 'Hola 👋 ¿En qué puedo ayudarte?'}
           </p>
@@ -169,6 +228,7 @@ export function ChatUI({ siteKey }: { siteKey: string }) {
           <button
             onClick={submitLead}
             disabled={leadSaving}
+            className="cw-primary-btn"
             style={{ padding: '11px', background: accent, color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, fontWeight: 600, cursor: leadSaving ? 'default' : 'pointer', opacity: leadSaving ? 0.7 : 1 }}
           >
             {leadSaving ? 'Guardando…' : 'Comenzar'}
@@ -180,34 +240,57 @@ export function ChatUI({ siteKey }: { siteKey: string }) {
       ) : (
       <>
       {/* Messages */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {messages.length === 0 && (
-          <p style={{ fontSize: 14, color: '#1D1D1D', lineHeight: 1.4 }}>
-            ¡Hola {lead.name.split(' ')[0]}! ¿En qué puedo ayudarte?
-          </p>
-        )}
-
-        {messages.map((msg, i) => (
-          <div key={i} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-            <div
-              style={{
-                fontSize: 14, lineHeight: 1.4, padding: '8px 12px', maxWidth: '85%', borderRadius: 4,
-                background: msg.role === 'user' ? accent : '#f4f4f4',
-                color: msg.role === 'user' ? '#fff' : '#1D1D1D',
-              }}
-            >
-              {msg.role === 'user' ? msg.content : <ReactMarkdown>{msg.content}</ReactMarkdown>}
+          <div className="cw-msg" style={{ display: 'flex', justifyContent: 'flex-start' }}>
+            <div style={{
+              fontSize: 14, lineHeight: 1.45, padding: '9px 13px', maxWidth: '85%',
+              borderRadius: 16, borderBottomLeftRadius: 4,
+              background: '#f1f2f4', color: '#1D1D1D',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.06)', wordBreak: 'break-word',
+            }}>
+              ¡Hola {lead.name.split(' ')[0]}! ¿En qué puedo ayudarte?
             </div>
           </div>
-        ))}
+        )}
+
+        {messages.map((msg, i) => {
+          const isUser = msg.role === 'user';
+          return (
+            <div key={i} className="cw-msg" style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start' }}>
+              <div
+                style={{
+                  fontSize: 14, lineHeight: 1.45, padding: '9px 13px', maxWidth: '85%',
+                  borderRadius: 16,
+                  borderBottomRightRadius: isUser ? 4 : 16,
+                  borderBottomLeftRadius: isUser ? 16 : 4,
+                  background: isUser ? accent : '#f1f2f4',
+                  color: isUser ? '#fff' : '#1D1D1D',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+                  wordBreak: 'break-word',
+                  whiteSpace: isUser ? 'pre-wrap' : 'normal',
+                }}
+              >
+                {isUser ? msg.content : <ReactMarkdown>{msg.content}</ReactMarkdown>}
+              </div>
+            </div>
+          );
+        })}
 
         {loading && (
-          <div style={{ fontSize: 14, color: '#888', padding: '8px 12px' }}>···</div>
+          <div className="cw-msg" style={{ display: 'flex', justifyContent: 'flex-start' }}>
+            <div style={{
+              padding: '11px 14px', background: '#f1f2f4', borderRadius: 16, borderBottomLeftRadius: 4,
+              boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+            }}>
+              <TypingDots />
+            </div>
+          </div>
         )}
 
         {action?.type === 'whatsapp' && !loading && (
-          <a href={action.url} target="_blank" rel="noopener noreferrer"
-             style={{ textAlign: 'center', background: '#25D366', color: '#fff', padding: '12px', textDecoration: 'none', fontSize: 14, borderRadius: 4 }}>
+          <a href={action.url} target="_blank" rel="noopener noreferrer" className="cw-wa-btn cw-msg"
+             style={{ textAlign: 'center', background: '#25D366', color: '#fff', padding: '12px', textDecoration: 'none', fontSize: 14, borderRadius: 10, fontWeight: 600 }}>
             Abrir WhatsApp
           </a>
         )}
@@ -216,16 +299,38 @@ export function ChatUI({ siteKey }: { siteKey: string }) {
       </div>
 
       {/* Input */}
-      <div style={{ display: 'flex', borderTop: '1px solid #e5e5e5', flexShrink: 0 }}>
-        <input
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, borderTop: '1px solid #e5e5e5', padding: '10px 12px', flexShrink: 0 }}>
+        <textarea
+          ref={textareaRef}
           value={input}
           onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && sendMessage(input)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              sendMessage(input);
+            }
+          }}
+          rows={1}
           placeholder="Escribe tu mensaje..."
-          style={{ flex: 1, fontSize: 14, padding: '12px', border: 'none', outline: 'none' }}
+          className="cw-input"
+          style={{
+            flex: 1, fontSize: 14, lineHeight: 1.4, padding: '10px 12px',
+            border: '1px solid #e0e0e0', borderRadius: 18, outline: 'none',
+            resize: 'none', maxHeight: 120, overflowY: 'auto',
+            fontFamily: 'inherit',
+          }}
+          onFocus={e => { e.currentTarget.style.borderColor = accent; e.currentTarget.style.boxShadow = `0 0 0 3px ${accent}22`; }}
+          onBlur={e => { e.currentTarget.style.borderColor = '#e0e0e0'; e.currentTarget.style.boxShadow = 'none'; }}
         />
         <button onClick={() => sendMessage(input)} disabled={loading || !input.trim()}
-          style={{ padding: '0 16px', background: '#1D1D1D', color: '#fff', border: 'none', fontSize: 16, cursor: 'pointer' }}>
+          className="cw-send-btn"
+          style={{
+            width: 40, height: 40, flexShrink: 0, borderRadius: '50%',
+            background: input.trim() && !loading ? accent : '#1D1D1D',
+            color: '#fff', border: 'none', fontSize: 18, cursor: loading || !input.trim() ? 'default' : 'pointer',
+            opacity: loading || !input.trim() ? 0.45 : 1,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
           →
         </button>
       </div>
